@@ -1,0 +1,14 @@
+# Секреты и списки адресов живут только на сервере.
+.env
+proxies.txt
+proxy_https_auth.txt
+*.pool.txt
+
+# Библиотека подтягивается клоном, в репозитории её не держим.
+lib/
+
+logs/
+dumps/
+__pycache__/
+*.py[cod]
+.venv/
