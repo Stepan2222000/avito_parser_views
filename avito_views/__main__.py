@@ -1,6 +1,6 @@
 """Командная строка обхода.
 
-    python -m avito_views init                 — применить схемы: библиотечную и нашу
+    python -m avito_views init                 — применить схемы и вьюхи для отчётов
     python -m avito_views load [--limit N]     — залить артикулы из smart в очередь
     python -m avito_views run [--limit N]      — обход: каталоги и карточки вперемешку
     python -m avito_views refresh [--days 7]   — вернуть в очередь давние карточки и обойти
@@ -18,9 +18,10 @@ import logging
 import statistics
 import time
 from collections import Counter
+from pathlib import Path
 
-from avito import Store, detect
-from avito import barriers
+import asyncpg
+from avito import Склад, barriers, detect
 
 from avito_views.config import настройки as собрать_настройки
 from avito_views.db import Очередь
@@ -34,17 +35,20 @@ from avito_views.work import обойти
 
 
 async def init(настройки, _) -> None:
-    склад = Store(настройки.склад_dsn)
+    склад = Склад(настройки.склад_dsn)
     try:
-        await склад.apply_schema()
+        await склад.применить_схему()
+        вьюхи = (Path(__file__).parent / "вьюхи.sql").read_text(encoding="utf-8")
+        async with (await склад.пул()).acquire() as с:
+            await с.execute(вьюхи)
     finally:
-        await склад.close()
+        await склад.закрыть()
     очередь = Очередь(настройки.очередь_dsn)
     try:
         await очередь.применить_схему()
     finally:
         await очередь.закрыть()
-    лог.info("схемы применены: библиотечная в %s, наша в %s",
+    лог.info("схема библиотеки и вьюхи применены в %s, очереди — в %s",
              _база(настройки.склад_dsn), _база(настройки.очередь_dsn))
 
 
@@ -91,7 +95,27 @@ async def status(настройки, _) -> None:
         сводка = await очередь.сводка()
     finally:
         await очередь.закрыть()
+    сводка["собрано в базе библиотеки"] = await _что_в_складе(настройки.склад_dsn)
     print(json.dumps(сводка, ensure_ascii=False, indent=2, default=str))
+
+
+async def _что_в_складе(dsn: str) -> dict:
+    """Цифры собранного читаем из базы библиотеки: у себя мы их не держим."""
+    с = await asyncpg.connect(dsn)
+    try:
+        строка = await с.fetchrow(
+            """select (select count(*) from объявления) объявлений,
+                      (select count(*) from объявления where снято) снятых,
+                      (select count(*) from наблюдения) наблюдений,
+                      (select count(*) from объявления where просмотров_всего is not null)
+                          с_просмотрами,
+                      (select coalesce(sum(просмотров_всего), 0) from объявления) просмотров,
+                      (select max(просмотров_всего) from объявления) максимум""")
+        return dict(строка) if строка else {}
+    except asyncpg.UndefinedTableError:
+        return {"схема не применена": True}
+    finally:
+        await с.close()
 
 
 async def reset(настройки, доводы) -> None:

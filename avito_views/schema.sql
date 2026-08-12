@@ -1,51 +1,40 @@
--- Очереди обхода. Объявления, продавцы и наблюдения за просмотрами живут не здесь —
--- их ведёт библиотека в своей базе. Здесь только то, чего у неё нет: что мы собираемся
--- обойти, что уже обошли и по какому артикулу что нашлось.
+-- Очереди обхода — и только они. Объявления, продавцы, наблюдения за просмотрами и
+-- связь артикула с объявлениями живут в базе библиотеки, здесь их дублировать незачем:
+-- связку она пишет сама (запросы + находки), а просмотры лежат в наблюдениях.
+--
+-- Здесь остаётся то, чего у библиотеки нет и быть не может: что предстоит обойти, что
+-- уже обошли, сколько было попыток и чем задача кончилась.
 
--- Задача на каталог: один артикул — одна строка.
-create table if not exists article_tasks (
-    article     text primary key,
-    path        text not null,              -- категория, в которой искали
-    status      text not null default 'новая',   -- новая | в работе | готова | ошибка
-    attempts    integer not null default 0,
-    error       text,
-    found_total bigint,                     -- сколько нашлось по мнению Авито
-    pages_total integer,                    -- докуда пускали листать
-    items_found integer,                    -- сколько объявлений собрали
-    wide        boolean not null default false,  -- выдача упёрлась в потолок Авито
-    taken_at    timestamptz,
-    done_at     timestamptz,
-    created_at  timestamptz not null default now()
+create table if not exists очередь_артикулов (
+    артикул  text primary key,
+    путь     text not null,               -- категория, в которой искали
+    статус   text not null default 'новая',   -- новая | в работе | готова | пусто | ошибка
+    попыток  integer not null default 0,
+    ошибка   text,
+    нашлось  bigint,                      -- сколько нашлось по мнению Авито
+    страниц  integer,                     -- докуда пускали листать
+    собрано  integer,                     -- сколько объявлений забрали
+    широкая  boolean not null default false,  -- выдача упёрлась в потолок Авито
+    взята    timestamptz,
+    сделана  timestamptz,
+    создана  timestamptz not null default now()
 );
 
-create index if not exists article_tasks_status on article_tasks (status, created_at);
+create index if not exists очередь_артикулов_статус
+    on очередь_артикулов (статус, создана);
 
--- Задача на карточку: один номер объявления — одна строка, независимо от того,
--- сколькими артикулами он найден. Просмотры дублируем последним значением, чтобы
--- смотреть на очередь без обращения к базе библиотеки.
-create table if not exists item_tasks (
-    item_id    bigint primary key,
-    status     text not null default 'новая',  -- новая | в работе | готова | снято | ошибка
-    attempts   integer not null default 0,
-    error      text,
-    views      integer,
-    taken_at   timestamptz,
-    parsed_at  timestamptz,
-    created_at timestamptz not null default now()
+-- Одно объявление — одна строка, независимо от того, сколькими артикулами оно найдено.
+-- По полю «спаршена» работает недельный переобход: она же и единственная причина,
+-- по которой эта таблица существует отдельно от библиотечной.
+create table if not exists очередь_объявлений (
+    объявление bigint primary key,
+    статус     text not null default 'новая',  -- новая | в работе | готова | снято | ошибка
+    попыток    integer not null default 0,
+    ошибка     text,
+    взята      timestamptz,
+    спаршена   timestamptz,
+    создана    timestamptz not null default now()
 );
 
-create index if not exists item_tasks_status on item_tasks (status, parsed_at nulls first);
-
--- Связка «артикул — объявление»: у детали бывает несколько артикулов-аналогов, и одно
--- объявление находится сразу по нескольким. Связь нужна, чтобы считать просмотры по
--- артикулу, и она историческая: объявление могло выпасть из выдачи, но остаться живым.
-create table if not exists article_items (
-    article       text not null,
-    item_id       bigint not null,
-    page          integer,
-    first_seen_at timestamptz not null default now(),
-    last_seen_at  timestamptz not null default now(),
-    primary key (article, item_id)
-);
-
-create index if not exists article_items_item on article_items (item_id);
+create index if not exists очередь_объявлений_статус
+    on очередь_объявлений (статус, спаршена nulls first);
