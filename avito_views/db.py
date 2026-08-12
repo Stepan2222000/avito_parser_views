@@ -148,14 +148,15 @@ class Очередь:
     # ------------------------------------------------------------------ исходы артикула
 
     async def артикул_готов(self, артикул: str, *, всего: int | None,
-                            страниц: int | None, объявлений: int,
-                            широкий: bool) -> None:
+                            страниц: int | None, объявлений: int, широкий: bool,
+                            заметка: str | None = None) -> None:
         async with (await self.пул()).acquire() as с:
             await с.execute(
                 """update article_tasks
-                   set status = 'готова', done_at = now(), error = null,
+                   set status = 'готова', done_at = now(), error = $6,
                        found_total = $2, pages_total = $3, items_found = $4, wide = $5
-                   where article = $1""", артикул, всего, страниц, объявлений, широкий)
+                   where article = $1""",
+                артикул, всего, страниц, объявлений, широкий, заметка)
 
     async def артикул_упал(self, артикул: str, ошибка: str, *, попыток: int) -> str:
         """Вернуть в очередь или признать неудачу, если попытки исчерпаны."""
