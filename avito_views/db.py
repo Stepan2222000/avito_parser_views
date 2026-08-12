@@ -158,15 +158,25 @@ class Очередь:
                    where article = $1""",
                 артикул, всего, страниц, объявлений, широкий, заметка)
 
-    async def артикул_упал(self, артикул: str, ошибка: str, *, попыток: int) -> str:
-        """Вернуть в очередь или признать неудачу, если попытки исчерпаны."""
+    async def артикул_упал(self, артикул: str, ошибка: str, *, попыток: int,
+                           исчерпан: str = "ошибка") -> str:
+        """Вернуть в очередь или, когда попытки исчерпаны, поставить итоговый статус.
+
+        Итог бывает разный: обычная неудача — «ошибка», а страница подбора по номеру,
+        пришедшая трижды с разных адресов, — это «пусто», объявлений по номеру нет.
+        """
         async with (await self.пул()).acquire() as с:
             строка = await с.fetchrow(
                 """update article_tasks
                    set attempts = attempts + 1, error = $2,
-                       status = case when attempts + 1 >= $3 then 'ошибка' else 'новая' end
+                       status = case when attempts + 1 >= $3 then $4 else 'новая' end,
+                       done_at = case when attempts + 1 >= $3 then now() else done_at end,
+                       found_total = case when attempts + 1 >= $3 and $4 = 'пусто'
+                                          then 0 else found_total end,
+                       items_found = case when attempts + 1 >= $3 and $4 = 'пусто'
+                                          then 0 else items_found end
                    where article = $1
-                   returning status""", артикул, ошибка[:500], попыток)
+                   returning status""", артикул, ошибка[:500], попыток, исчерпан)
         return строка["status"] if строка else "нет такой"
 
     async def артикул_вернуть(self, артикул: str) -> None:
@@ -247,7 +257,7 @@ class Очередь:
         async with (await self.пул()).acquire() as с:
             строки = await с.fetch(
                 """update article_tasks set status = 'новая', attempts = 0, error = null
-                   where status in ('готова', 'ошибка') returning article""")
+                   where status in ('готова', 'ошибка', 'пусто') returning article""")
         return len(строки)
 
     async def сбросить_зависшие(self, через: float) -> dict:
