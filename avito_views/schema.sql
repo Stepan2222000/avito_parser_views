@@ -23,11 +23,24 @@ create index if not exists очередь_артикулов_статус
 
 -- Что нашлось в выдачах. Одно объявление — одна строка, независимо от того, сколькими
 -- артикулами оно найдено: связь с артикулом ведёт библиотека в своих находках, а здесь
--- только очередь на разбор карточек. Поля разбора добавятся вместе с самим разбором.
+-- только ход разбора карточек.
+--
+-- «Спаршена» — единственная причина, по которой эта таблица существует отдельно от
+-- библиотечной: по ней работает переобход, когда просмотры пора снимать заново.
 create table if not exists очередь_объявлений (
     объявление bigint primary key,
-    статус     text not null default 'новая',
+    статус     text not null default 'новая',   -- новая | в работе | готова | снято | ошибка
+    попыток    integer not null default 0,
+    ошибка     text,
+    взята      timestamptz,
+    спаршена   timestamptz,
     создана    timestamptz not null default now()
 );
 
-create index if not exists очередь_объявлений_статус on очередь_объявлений (статус);
+create index if not exists очередь_объявлений_статус
+    on очередь_объявлений (статус, спаршена nulls first);
+
+alter table очередь_объявлений add column if not exists попыток integer not null default 0;
+alter table очередь_объявлений add column if not exists ошибка text;
+alter table очередь_объявлений add column if not exists взята timestamptz;
+alter table очередь_объявлений add column if not exists спаршена timestamptz;
