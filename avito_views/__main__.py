@@ -2,14 +2,16 @@
 
 Сделано два этапа: очередь артикулов и обход выдачи по ним.
 
-    python -m avito_views init                 — применить схемы: нашу и библиотечную
-    python -m avito_views load [--limit N]     — залить артикулы из smart в очередь
-    python -m avito_views run [--limit N]      — обойти выдачи по артикулам
-    python -m avito_views status                — что сейчас в очередях
-    python -m avito_views reset                 — вернуть в очередь брошенные задачи
-    python -m avito_views proxies               — состояние пула адресов
+    python -m avito_views init                — применить схемы: нашу и библиотечную
+    python -m avito_views load [--limit N]    — залить артикулы из smart в очередь
+    python -m avito_views run [--limit N]     — обход: карточки, а в промежутках выдачи
+    python -m avito_views refresh [--days 7]  — снять просмотры заново по давним карточкам
+    python -m avito_views status              — что сейчас в очередях
+    python -m avito_views reset               — вернуть в очередь брошенные задачи
+    python -m avito_views proxies             — состояние пула адресов
 
-Разбор карточек и переобход добавляются следующими этапами.
+Чтобы поискать новые объявления по уже обойдённым артикулам, годится `load --again`: она
+возвращает артикулы в очередь, и обход пройдёт по ним заново.
 """
 from __future__ import annotations
 
@@ -61,6 +63,19 @@ async def load(настройки, доводы) -> None:
 
 async def run(настройки, доводы) -> None:
     await обойти(настройки, предел=доводы.limit, воркеров=доводы.workers)
+
+
+async def refresh(настройки, доводы) -> None:
+    """Снять просмотры заново по тем карточкам, которых давно не касались."""
+    дней = доводы.days if доводы.days is not None else настройки.дней
+    очередь = Очередь(настройки.очередь_dsn)
+    try:
+        сколько = await очередь.переочередить(дней)
+    finally:
+        await очередь.закрыть()
+    лог.info("в очередь вернулось карточек: %d (не касались %d дней)", сколько, дней)
+    if not доводы.only_queue:
+        await обойти(настройки, предел=доводы.limit, воркеров=доводы.workers)
 
 
 async def status(настройки, _) -> None:
@@ -122,8 +137,8 @@ async def proxies(настройки, _) -> None:
     print(f"годных сейчас {годных} из {len(итоги)}")
 
 
-КОМАНДЫ = {"init": init, "load": load, "run": run, "status": status,
-           "reset": reset, "proxies": proxies}
+КОМАНДЫ = {"init": init, "load": load, "run": run, "refresh": refresh,
+           "status": status, "reset": reset, "proxies": proxies}
 
 
 def _база(dsn: str) -> str:
@@ -139,6 +154,10 @@ def разобрать_доводы():
     р.add_argument("--workers", type=int, default=None, help="run: сколько воркеров")
     р.add_argument("--again", action="store_true",
                    help="load: вернуть в очередь и те артикулы, что уже обошли")
+    р.add_argument("--days", type=int, default=None,
+                   help="refresh: возраст карточек в днях, по умолчанию из настроек")
+    р.add_argument("--only-queue", action="store_true",
+                   help="refresh: только наполнить очередь, не обходить")
     р.add_argument("--stale", type=float, default=None,
                    help="reset: возраст брошенной задачи в секундах")
     р.add_argument("--verbose", action="store_true", help="подробный журнал")
