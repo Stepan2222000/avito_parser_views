@@ -12,6 +12,7 @@ lib/
 
 logs/
 dumps/
+TMP/
 __pycache__/
 *.py[cod]
 .venv/
